@@ -1,0 +1,468 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Klockandning</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Andning">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@1,7..72,300;1,7..72,400&family=Figtree:wght@400;500;600&display=swap">
+<style>
+/* Layout: one calm night-sea screen; breathing disc in the middle, settings below. Deliberately dark-only. */
+:root {
+  --bg: #0e1820;
+  --bg-2: #15232d;
+  --line: #24363f;
+  --fg: #e4ebe8;
+  --muted: #8b9ca2;
+  --in: #ead9a8;      /* bright bell, inhale */
+  --out: #5f9aa0;     /* dark bell, exhale */
+  --display: "Literata", Georgia, "Times New Roman", serif;
+  --body: "Figtree", -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--body);
+  font-size: 15px;
+  -webkit-tap-highlight-color: transparent;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.app {
+  max-width: 440px;
+  min-height: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-block: 20px 28px;
+  box-sizing: border-box;
+}
+header { display: flex; justify-content: space-between; align-items: baseline; }
+h1 {
+  font-family: var(--display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.5rem;
+  margin: 0;
+}
+.pattern-tag {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Breathing disc */
+.stage {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 1;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+}
+.guide {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  border: 1px dashed var(--line);
+}
+.disc {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--c, var(--out)) 55%, transparent), color-mix(in srgb, var(--c, var(--out)) 14%, transparent) 70%);
+  box-shadow: 0 0 60px color-mix(in srgb, var(--c, var(--out)) 25%, transparent);
+  transform: scale(0.5);
+  will-change: transform;
+}
+.readout { position: relative; text-align: center; display: grid; gap: 2px; }
+.phase {
+  font-family: var(--display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 1.6rem;
+}
+.count {
+  font-family: var(--display);
+  font-weight: 300;
+  font-size: 3.4rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.session { display: grid; gap: 8px; }
+.session-row { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.bar { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0%; background: var(--fg); opacity: 0.6; }
+
+/* Controls */
+.controls { display: grid; gap: 16px; }
+.group { display: grid; gap: 8px; }
+.label { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg button {
+  flex: 1 1 0;
+  min-width: 52px;
+  padding: 11px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+  font: 500 0.95rem var(--body);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.seg button:disabled { opacity: 0.4; cursor: default; }
+.seg small { display: block; font-weight: 400; font-size: 0.7rem; opacity: 0.75; margin-top: 2px; }
+
+.vol { display: flex; align-items: center; gap: 12px; }
+.vol input { flex: 1; accent-color: var(--in); }
+.vol button {
+  border: 1px solid var(--line); background: transparent; color: var(--fg);
+  border-radius: 999px; padding: 7px 12px; font: 500 0.8rem var(--body); cursor: pointer; white-space: nowrap;
+}
+
+.actions { display: flex; gap: 10px; margin-top: 4px; }
+.primary, .secondary {
+  padding: 16px; border-radius: 999px; font: 600 1rem var(--body); cursor: pointer; border: 0;
+}
+.primary { flex: 1; background: var(--in); color: var(--bg); }
+.secondary { background: var(--bg-2); color: var(--fg); border: 1px solid var(--line); padding-inline: 22px; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outline-offset: 2px; }
+
+.hint { color: var(--muted); font-size: 0.8rem; line-height: 1.5; margin: 0; }
+</style>
+
+<div class="app">
+  <header>
+    <h1>Klockandning</h1>
+    <span class="pattern-tag" id="tag">4 in · 6 ut</span>
+  </header>
+
+  <div class="stage" aria-live="polite">
+    <div class="guide"></div>
+    <div class="disc" id="disc"></div>
+    <div class="readout">
+      <div class="phase" id="phase">Redo</div>
+      <div class="count" id="count">10:00</div>
+    </div>
+  </div>
+
+  <div class="session">
+    <div class="session-row"><span id="elapsed">0:00</span><span id="remaining">10:00 kvar</span></div>
+    <div class="bar"><i id="bar"></i></div>
+  </div>
+
+  <div class="controls">
+    <div class="group">
+      <span class="label">Rytm</span>
+      <div class="seg" id="patterns">
+        <button type="button" id="p44" data-in="4" data-out="4">4 – 4<small>balanserande</small></button>
+        <button type="button" id="p46" data-in="4" data-out="6">4 – 6<small>lugnande</small></button>
+      </div>
+    </div>
+    <div class="group">
+      <span class="label">Tid</span>
+      <div class="seg" id="times">
+        <button type="button" id="t3" data-min="3">3 min</button>
+        <button type="button" id="t5" data-min="5">5 min</button>
+        <button type="button" id="t10" data-min="10">10 min</button>
+        <button type="button" id="t15" data-min="15">15 min</button>
+        <button type="button" id="t20" data-min="20">20 min</button>
+      </div>
+    </div>
+    <div class="group">
+      <label class="label" for="vol">Klockvolym</label>
+      <div class="vol">
+        <input type="range" id="vol" min="0" max="1" step="0.05" value="0.7">
+        <button type="button" id="test">Provlyssna</button>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" class="primary" id="start">Starta</button>
+      <button type="button" class="secondary" id="stop" hidden>Avsluta</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const disc = $('disc'), phaseEl = $('phase'), countEl = $('count');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+  };
+
+  let pattern = store.get('pattern', { in: 4, out: 6 });
+  let minutes = store.get('minutes', 10);
+  let volume = store.get('volume', 0.7);
+  const voice = 'bowl';
+  $('vol').value = volume;
+
+  let ctx = null, master = null, comp = null, bus = null, impulse = null, noiseBuf = null;
+  let state = 'idle';            // idle | running | paused | done
+  let t0 = 0, cycles = 0, nextEvent = 0, raf = 0, wakeLock = null, timer = 0;
+
+  const fmt = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+  // Sound design. Each partial: [frequency ratio, amplitude, relative decay].
+  // Every partial is played as a slightly detuned pair, which gives the slow
+  // wavering shimmer of a real bowl or bell. A reverb adds the room.
+  const SOUNDS = {
+    bowl: {
+      in:  { f: 528, decay: 7,  attack: 0.012, beat: 1.6, strike: 0.25, strikeTone: 4, gain: 1,
+             partials: [[1, 1, 1], [2.71, 0.55, 0.65], [5.15, 0.28, 0.4], [8.17, 0.12, 0.25]] },
+      out: { f: 220, decay: 10, attack: 0.02,  beat: 0.9, strike: 0.18, strikeTone: 3, gain: 1.5,
+             partials: [[1, 1, 1], [2.71, 0.7, 0.75], [5.15, 0.3, 0.45], [8.17, 0.08, 0.25]] }
+    }
+  };
+
+  function makeImpulse(seconds, curve) {
+    const rate = ctx.sampleRate, len = Math.floor(rate * seconds);
+    const buf = ctx.createBuffer(2, len, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, curve);
+    }
+    return buf;
+  }
+
+  function connectBus() {
+    bus = ctx.createGain();
+    const dry = ctx.createGain(); dry.gain.value = 0.75;
+    const conv = ctx.createConvolver(); conv.buffer = impulse;
+    const wet = ctx.createGain(); wet.gain.value = 0.6;
+    bus.connect(dry); dry.connect(comp);
+    bus.connect(conv); conv.connect(wet); wet.connect(comp);
+  }
+
+  function ensureAudio() {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain();
+      master.gain.value = volume;
+      comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.knee.value = 12; comp.ratio.value = 4;
+      comp.attack.value = 0.003; comp.release.value = 0.4;
+      comp.connect(master); master.connect(ctx.destination);
+      impulse = makeImpulse(4.5, 3);
+      noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.2), ctx.sampleRate);
+      const nd = noiseBuf.getChannelData(0);
+      for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+      connectBus();
+    }
+    if (ctx.state === 'suspended') ctx.resume();
+  }
+
+  function bell(time, s, level = 1) {
+    const out = ctx.createGain();
+    out.gain.value = 0.16 * level * s.gain;
+    out.connect(bus);
+    s.partials.forEach(([ratio, amp, rel], i) => {
+      const f = s.f * ratio;
+      const d = s.decay * rel;
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, time);
+      env.gain.linearRampToValueAtTime(amp, time + s.attack);
+      env.gain.exponentialRampToValueAtTime(0.0001, time + s.attack + d);
+      if (ctx.createStereoPanner) {
+        const p = ctx.createStereoPanner();
+        p.pan.value = (i % 2 ? 1 : -1) * 0.3 * Math.min(1, i / 2);
+        env.connect(p); p.connect(out);
+      } else env.connect(out);
+      const spread = s.beat * (0.5 + i * 0.3) / 2;
+      [-1, 1].forEach(sign => {
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.value = f + sign * spread;
+        const g = ctx.createGain(); g.gain.value = 0.5;
+        o.connect(g); g.connect(env);
+        o.start(time);
+        o.stop(time + s.attack + d + 0.1);
+      });
+    });
+    if (s.strike) {
+      const n = ctx.createBufferSource(); n.buffer = noiseBuf;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.value = Math.min(8000, s.f * s.strikeTone); bp.Q.value = 1.2;
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.0001, time);
+      ng.gain.linearRampToValueAtTime(s.strike, time + 0.002);
+      ng.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
+      n.connect(bp); bp.connect(ng); ng.connect(out);
+      n.start(time); n.stop(time + 0.15);
+    }
+  }
+
+  function preview() {
+    ensureAudio();
+    const t = ctx.currentTime + 0.05;
+    bell(t, SOUNDS[voice].in);
+    bell(t + 2.4, SOUNDS[voice].out);
+  }
+
+  function render() {
+    const tag = `${pattern.in} in · ${pattern.out} ut`;
+    $('tag').textContent = tag;
+    document.querySelectorAll('#patterns button').forEach(b =>
+      b.setAttribute('aria-pressed', +b.dataset.in === pattern.in && +b.dataset.out === pattern.out));
+    document.querySelectorAll('#times button').forEach(b =>
+      b.setAttribute('aria-pressed', +b.dataset.min === minutes));
+    const locked = state === 'running' || state === 'paused';
+    document.querySelectorAll('#patterns button, #times button').forEach(b => b.disabled = locked);
+    $('start').textContent = state === 'running' ? 'Paus' : state === 'paused' ? 'Fortsätt' : state === 'done' ? 'Starta igen' : 'Starta';
+    $('stop').hidden = !locked;
+    if (state === 'idle') {
+      phaseEl.textContent = 'Redo';
+      countEl.textContent = fmt(minutes * 60);
+      $('elapsed').textContent = '0:00';
+      $('remaining').textContent = fmt(minutes * 60) + ' kvar';
+      $('bar').style.width = '0%';
+      disc.style.setProperty('--c', 'var(--out)');
+      disc.style.transform = 'scale(0.5)';
+    }
+  }
+
+  function scheduleAhead() {
+    const cyc = pattern.in + pattern.out;
+    const horizon = ctx.currentTime + 0.25;
+    const lastEvent = cycles * 2;          // index of the closing chime
+    while (nextEvent <= lastEvent) {
+      const k = nextEvent;
+      const t = t0 + Math.floor(k / 2) * cyc + (k % 2 ? pattern.in : 0);
+      if (t > horizon) break;
+      const snd = SOUNDS[voice];
+      if (k === lastEvent) { bell(t, snd.in, 0.8); bell(t + 1.2, snd.out, 0.8); bell(t + 2.4, snd.out, 0.6); }
+      else bell(t, k % 2 ? snd.out : snd.in);
+      nextEvent++;
+    }
+  }
+
+  function frame() {
+    const cyc = pattern.in + pattern.out;
+    const total = cycles * cyc;
+    const e = ctx.currentTime - t0;
+    if (e >= total) { finish(); return; }
+    const c = e % cyc;
+    const inhale = c < pattern.in;
+    const p = inhale ? c / pattern.in : (c - pattern.in) / pattern.out;
+    const ease = (1 - Math.cos(Math.PI * p)) / 2;
+    const s = inhale ? 0.5 + 0.5 * ease : 1 - 0.5 * ease;
+    disc.style.transform = reduced ? 'scale(0.8)' : `scale(${s.toFixed(4)})`;
+    disc.style.setProperty('--c', inhale ? 'var(--in)' : 'var(--out)');
+    phaseEl.textContent = inhale ? 'Andas in' : 'Andas ut';
+    const left = inhale ? pattern.in - c : cyc - c;
+    countEl.textContent = Math.ceil(left - 0.001);
+    $('elapsed').textContent = fmt(e);
+    $('remaining').textContent = fmt(total - e) + ' kvar';
+    $('bar').style.width = (100 * e / total).toFixed(2) + '%';
+    raf = requestAnimationFrame(frame);
+  }
+
+  async function lockScreen() {
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { wakeLock = null; }
+  }
+  function releaseScreen() { try { wakeLock?.release(); } catch {} wakeLock = null; }
+
+  function start() {
+    ensureAudio();
+    const cyc = pattern.in + pattern.out;
+    cycles = Math.ceil(minutes * 60 / cyc);
+    t0 = ctx.currentTime + 0.15;
+    nextEvent = 0;
+    state = 'running';
+    scheduleAhead();
+    clearInterval(timer);
+    timer = setInterval(scheduleAhead, 50);
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(frame);
+    lockScreen();
+    render();
+  }
+
+  function pause() {
+    state = 'paused';
+    ctx.suspend();
+    cancelAnimationFrame(raf);
+    phaseEl.textContent = 'Paus';
+    releaseScreen();
+    render();
+  }
+
+  function resume() {
+    state = 'running';
+    ctx.resume().then(() => { raf = requestAnimationFrame(frame); });
+    lockScreen();
+    render();
+  }
+
+  function finish() {
+    clearInterval(timer);
+    cancelAnimationFrame(raf);
+    state = 'done';
+    phaseEl.textContent = 'Klart';
+    countEl.textContent = fmt(cycles * (pattern.in + pattern.out));
+    $('bar').style.width = '100%';
+    $('remaining').textContent = '0:00 kvar';
+    disc.style.transform = 'scale(0.5)';
+    releaseScreen();
+    render();
+  }
+
+  function stop() {
+    clearInterval(timer);
+    cancelAnimationFrame(raf);
+    if (ctx) {
+      // Silence bells already scheduled by swapping the input bus; the reverb tail fades out naturally.
+      bus.disconnect();
+      connectBus();
+      if (ctx.state === 'suspended') ctx.resume();
+    }
+    releaseScreen();
+    state = 'idle';
+    render();
+  }
+
+  $('patterns').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    pattern = { in: +b.dataset.in, out: +b.dataset.out };
+    store.set('pattern', pattern);
+    if (state === 'done') state = 'idle';
+    render();
+  });
+  $('times').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    minutes = +b.dataset.min;
+    store.set('minutes', minutes);
+    if (state === 'done') state = 'idle';
+    render();
+  });
+  $('vol').addEventListener('input', e => {
+    volume = +e.target.value;
+    store.set('volume', volume);
+    if (master) master.gain.value = volume;
+  });
+  $('test').addEventListener('click', preview);
+  $('start').addEventListener('click', () => {
+    if (state === 'running') pause();
+    else if (state === 'paused') resume();
+    else start();
+  });
+  $('stop').addEventListener('click', stop);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state === 'running') lockScreen();
+  });
+
+  render();
+})();
+</script>
+
+</body></html>
