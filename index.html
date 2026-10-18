@@ -208,7 +208,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
 
   let ctx = null, master = null, comp = null, bus = null, impulse = null, noiseBuf = null;
   let state = 'idle';            // idle | running | paused | done
-  let t0 = 0, cycles = 0, nextEvent = 0, raf = 0, wakeLock = null, timer = 0;
+  let cycles = 0, nextEvent = 0, raf = 0, wakeLock = null, timer = 0;
 
   const fmt = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 
@@ -330,14 +330,24 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     }
   }
 
+  // Timing runs on the wall clock (performance.now), not the audio clock.
+  // On iPhone the audio clock can run a few percent fast when the sample rate
+  // doesn't match the hardware, which made every breath slightly short.
+  // Bells are only scheduled 0.2 s ahead, so the audio clock can't drift.
+  let runStart = 0, elapsedBase = 0;
+  const now = () => performance.now() / 1000;
+  const elapsed = () => state === 'running' ? elapsedBase + (now() - runStart) : elapsedBase;
+  const eventTime = k => Math.floor(k / 2) * (pattern.in + pattern.out) + (k % 2 ? pattern.in : 0);
+
   function scheduleAhead() {
-    const cyc = pattern.in + pattern.out;
-    const horizon = ctx.currentTime + 0.25;
+    if (state !== 'running') return;
+    const e = elapsed();
     const lastEvent = cycles * 2;          // index of the closing chime
     while (nextEvent <= lastEvent) {
       const k = nextEvent;
-      const t = t0 + Math.floor(k / 2) * cyc + (k % 2 ? pattern.in : 0);
-      if (t > horizon) break;
+      const delay = eventTime(k) - e;
+      if (delay > 0.2) break;
+      const t = ctx.currentTime + Math.max(0.005, delay);
       const snd = SOUNDS[voice];
       if (k === lastEvent) { bell(t, snd.in, 0.8); bell(t + 1.2, snd.out, 0.8); bell(t + 2.4, snd.out, 0.6); }
       else bell(t, k % 2 ? snd.out : snd.in);
@@ -348,7 +358,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   function frame() {
     const cyc = pattern.in + pattern.out;
     const total = cycles * cyc;
-    const e = ctx.currentTime - t0;
+    const e = Math.max(0, elapsed());
     if (e >= total) { finish(); return; }
     const c = e % cyc;
     const inhale = c < pattern.in;
@@ -375,7 +385,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     ensureAudio();
     const cyc = pattern.in + pattern.out;
     cycles = Math.ceil(minutes * 60 / cyc);
-    t0 = ctx.currentTime + 0.15;
+    elapsedBase = -0.15;
+    runStart = now();
     nextEvent = 0;
     state = 'running';
     scheduleAhead();
@@ -387,9 +398,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     render();
   }
 
+  function silenceScheduled() {
+    // Cut bells already scheduled by swapping the input bus; the reverb tail fades out naturally.
+    bus.disconnect();
+    connectBus();
+  }
+
   function pause() {
+    elapsedBase = elapsed();
     state = 'paused';
-    ctx.suspend();
+    silenceScheduled();
+    nextEvent = 0;
+    while (nextEvent <= cycles * 2 && eventTime(nextEvent) < elapsedBase) nextEvent++;
     cancelAnimationFrame(raf);
     phaseEl.textContent = 'Paus';
     releaseScreen();
@@ -397,13 +417,17 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   }
 
   function resume() {
+    ensureAudio();
+    runStart = now();
     state = 'running';
-    ctx.resume().then(() => { raf = requestAnimationFrame(frame); });
+    scheduleAhead();
+    raf = requestAnimationFrame(frame);
     lockScreen();
     render();
   }
 
   function finish() {
+    scheduleAhead();                       // make sure the closing chime is queued
     clearInterval(timer);
     cancelAnimationFrame(raf);
     state = 'done';
@@ -419,14 +443,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   function stop() {
     clearInterval(timer);
     cancelAnimationFrame(raf);
-    if (ctx) {
-      // Silence bells already scheduled by swapping the input bus; the reverb tail fades out naturally.
-      bus.disconnect();
-      connectBus();
-      if (ctx.state === 'suspended') ctx.resume();
-    }
+    if (ctx) silenceScheduled();
     releaseScreen();
     state = 'idle';
+    elapsedBase = 0;
     render();
   }
 
