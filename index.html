@@ -1,4 +1,14 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.4 system-ui, -apple-system, sans-serif; }
+[hidden] { display: none !important; }
+</style>
 <title>Klockandning</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -137,6 +147,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
 .hint { color: var(--muted); font-size: 0.8rem; line-height: 1.5; margin: 0; }
 </style>
 
+</head>
+<body>
 <div class="app">
   <header>
     <h1>Klockandning</h1>
@@ -203,121 +215,172 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   let pattern = store.get('pattern', { in: 4, out: 6 });
   let minutes = store.get('minutes', 10);
   let volume = store.get('volume', 0.7);
-  const voice = 'bowl';
   $('vol').value = volume;
 
-  let ctx = null, master = null, comp = null, bus = null, impulse = null, noiseBuf = null;
-  let state = 'idle';            // idle | running | paused | done
-  let cycles = 0, nextEvent = 0, raf = 0, wakeLock = null, timer = 0;
-
-  const fmt = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
-
-  // Sound design. Each partial: [frequency ratio, amplitude, relative decay].
-  // Every partial is played as a slightly detuned pair, which gives the slow
-  // wavering shimmer of a real bowl or bell. A reverb adds the room.
-  const SOUNDS = {
-    bowl: {
-      in:  { f: 528, decay: 7,  attack: 0.012, beat: 1.6, strike: 0.25, strikeTone: 4, gain: 1,
-             partials: [[1, 1, 1], [2.71, 0.55, 0.65], [5.15, 0.28, 0.4], [8.17, 0.12, 0.25]] },
-      out: { f: 220, decay: 10, attack: 0.02,  beat: 0.9, strike: 0.18, strikeTone: 3, gain: 1.5,
-             partials: [[1, 1, 1], [2.71, 0.7, 0.75], [5.15, 0.3, 0.45], [8.17, 0.08, 0.25]] }
-    }
+  // The whole session is rendered to one audio file and played through an
+  // ordinary <audio> element. iPhone keeps that playing with the screen locked
+  // (Web Audio and timers stop there), and the file's own clock keeps the
+  // 4–4 / 4–6 rhythm exact.
+  const SR = 22050;
+  const LEAD = 0.3;                // seconds of silence before the first bell
+  const BOWL = {
+    in:  { f: 528, decay: 7,  attack: 0.012, beat: 1.6, strike: 0.25, strikeTone: 4, gain: 1,
+           partials: [[1, 1, 1], [2.71, 0.55, 0.65], [5.15, 0.28, 0.4], [8.17, 0.12, 0.25]] },
+    out: { f: 220, decay: 10, attack: 0.02,  beat: 0.9, strike: 0.18, strikeTone: 3, gain: 1.5,
+           partials: [[1, 1, 1], [2.71, 0.7, 0.75], [5.15, 0.3, 0.45], [8.17, 0.08, 0.25]] }
   };
 
-  function makeImpulse(seconds, curve) {
-    const rate = ctx.sampleRate, len = Math.floor(rate * seconds);
-    const buf = ctx.createBuffer(2, len, rate);
-    for (let ch = 0; ch < 2; ch++) {
-      const d = buf.getChannelData(ch);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, curve);
-    }
-    return buf;
-  }
+  let R = null;                    // rendered bell sounds: { in, out, end }
+  let state = 'idle';              // idle | running | paused | done
+  let cycles = 0, raf = 0, sessionUrl = null, previewUrl = null;
+  const player = new Audio();
+  const previewer = new Audio();
+  player.preload = previewer.preload = 'auto';
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
 
-  function connectBus() {
-    bus = ctx.createGain();
-    const dry = ctx.createGain(); dry.gain.value = 0.75;
-    const conv = ctx.createConvolver(); conv.buffer = impulse;
-    const wet = ctx.createGain(); wet.gain.value = 0.6;
-    bus.connect(dry); dry.connect(comp);
-    bus.connect(conv); conv.connect(wet); wet.connect(comp);
-  }
+  const fmt = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  const cycleLen = () => pattern.in + pattern.out;
+  const eventTime = k => Math.floor(k / 2) * cycleLen() + (k % 2 ? pattern.in : 0);
 
-  function ensureAudio() {
-    if (!ctx) {
-      ctx = new (window.AudioContext || window.webkitAudioContext)();
-      master = ctx.createGain();
-      master.gain.value = volume;
-      comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -14; comp.knee.value = 12; comp.ratio.value = 4;
-      comp.attack.value = 0.003; comp.release.value = 0.4;
-      comp.connect(master); master.connect(ctx.destination);
-      impulse = makeImpulse(4.5, 3);
-      noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.2), ctx.sampleRate);
-      const nd = noiseBuf.getChannelData(0);
-      for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
-      connectBus();
-    }
-    if (ctx.state === 'suspended') ctx.resume();
-  }
-
-  function bell(time, s, level = 1) {
-    const out = ctx.createGain();
+  // ---- Bell synthesis (offline) ----
+  function bell(c, dest, noise, time, s, level) {
+    const out = c.createGain();
     out.gain.value = 0.16 * level * s.gain;
-    out.connect(bus);
+    out.connect(dest);
     s.partials.forEach(([ratio, amp, rel], i) => {
-      const f = s.f * ratio;
-      const d = s.decay * rel;
-      const env = ctx.createGain();
+      const f = s.f * ratio, d = s.decay * rel;
+      const env = c.createGain();
       env.gain.setValueAtTime(0.0001, time);
       env.gain.linearRampToValueAtTime(amp, time + s.attack);
       env.gain.exponentialRampToValueAtTime(0.0001, time + s.attack + d);
-      if (ctx.createStereoPanner) {
-        const p = ctx.createStereoPanner();
-        p.pan.value = (i % 2 ? 1 : -1) * 0.3 * Math.min(1, i / 2);
-        env.connect(p); p.connect(out);
-      } else env.connect(out);
-      const spread = s.beat * (0.5 + i * 0.3) / 2;
+      env.connect(out);
+      const spread = s.beat * (0.5 + i * 0.3) / 2;   // detuned pair = slow shimmer
       [-1, 1].forEach(sign => {
-        const o = ctx.createOscillator();
-        o.type = 'sine';
+        const o = c.createOscillator();
         o.frequency.value = f + sign * spread;
-        const g = ctx.createGain(); g.gain.value = 0.5;
+        const g = c.createGain(); g.gain.value = 0.5;
         o.connect(g); g.connect(env);
-        o.start(time);
-        o.stop(time + s.attack + d + 0.1);
+        o.start(time); o.stop(time + s.attack + d + 0.1);
       });
     });
-    if (s.strike) {
-      const n = ctx.createBufferSource(); n.buffer = noiseBuf;
-      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
-      bp.frequency.value = Math.min(8000, s.f * s.strikeTone); bp.Q.value = 1.2;
-      const ng = ctx.createGain();
-      ng.gain.setValueAtTime(0.0001, time);
-      ng.gain.linearRampToValueAtTime(s.strike, time + 0.002);
-      ng.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
-      n.connect(bp); bp.connect(ng); ng.connect(out);
-      n.start(time); n.stop(time + 0.15);
+    const n = c.createBufferSource(); n.buffer = noise;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.value = Math.min(SR / 2.5, s.f * s.strikeTone); bp.Q.value = 1.2;
+    const ng = c.createGain();
+    ng.gain.setValueAtTime(0.0001, time);
+    ng.gain.linearRampToValueAtTime(s.strike, time + 0.002);
+    ng.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
+    n.connect(bp); bp.connect(ng); ng.connect(out);
+    n.start(time); n.stop(time + 0.15);
+  }
+
+  async function renderBells() {
+    const SLOT = 16, END = 20;
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const c = new OAC(1, Math.ceil((SLOT * 2 + END) * SR), SR);
+    const ir = c.createBuffer(1, Math.floor(SR * 4.5), SR);
+    const d = ir.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+    const noise = c.createBuffer(1, Math.floor(SR * 0.2), SR);
+    const nd = noise.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    const bus = c.createGain();
+    const dry = c.createGain(); dry.gain.value = 0.75;
+    const conv = c.createConvolver(); conv.normalize = true; conv.buffer = ir;
+    const wet = c.createGain(); wet.gain.value = 0.6;
+    bus.connect(dry); dry.connect(c.destination);
+    bus.connect(conv); conv.connect(wet); wet.connect(c.destination);
+
+    const t1 = 0.01, t2 = SLOT + 0.01, t3 = SLOT * 2 + 0.01;
+    bell(c, bus, noise, t1, BOWL.in, 1);
+    bell(c, bus, noise, t2, BOWL.out, 1);
+    bell(c, bus, noise, t3, BOWL.in, 0.8);
+    bell(c, bus, noise, t3 + 1.2, BOWL.out, 0.8);
+    bell(c, bus, noise, t3 + 2.4, BOWL.out, 0.6);
+
+    const buf = await new Promise((res, rej) => {
+      c.oncomplete = e => res(e.renderedBuffer);
+      const p = c.startRendering();
+      if (p && p.then) p.then(res, rej);
+    });
+    const all = buf.getChannelData(0);
+    const cut = (a, b) => {
+      const s = all.slice(Math.floor(a * SR), Math.floor(b * SR));
+      let last = s.length - 1;
+      while (last > 0 && Math.abs(s[last]) < 1e-5) last--;
+      return s.slice(0, last + 1);
+    };
+    R = { in: cut(t1, SLOT), out: cut(t2, SLOT * 2), end: cut(t3, SLOT * 2 + END) };
+  }
+
+  // ---- Mixing to a WAV file ----
+  function mixBlocks(events, n, sink) {
+    const B = 16384, tmp = new Float32Array(B);
+    for (let s = 0; s < n; s += B) {
+      const e = Math.min(n, s + B);
+      tmp.fill(0);
+      for (const ev of events) {
+        if (ev.start >= e) break;
+        const a = Math.max(s, ev.start), b = Math.min(e, ev.start + ev.buf.length);
+        const buf = ev.buf, off = ev.start;
+        for (let i = a; i < b; i++) tmp[i - s] += buf[i - off];
+      }
+      sink(tmp, s, e - s);
     }
   }
 
-  function preview() {
-    ensureAudio();
-    const t = ctx.currentTime + 0.05;
-    bell(t, SOUNDS[voice].in);
-    bell(t + 2.4, SOUNDS[voice].out);
+  const levelCache = {};
+  function levelFor(p) {
+    // Scale so the loudest overlap of bells (steady rhythm + closing chime) peaks at 90%.
+    const key = p.in + '-' + p.out;
+    if (levelCache[key]) return levelCache[key];
+    const cyc = p.in + p.out, evs = [];
+    for (let k = 0; k < 12; k++) evs.push({ start: Math.round((Math.floor(k / 2) * cyc + (k % 2 ? p.in : 0)) * SR), buf: k % 2 ? R.out : R.in });
+    evs.push({ start: Math.round(6 * cyc * SR), buf: R.end });
+    const n = evs[12].start + R.end.length;
+    let pk = 0;
+    mixBlocks(evs, n, (b, s, len) => { for (let i = 0; i < len; i++) { const v = b[i] < 0 ? -b[i] : b[i]; if (v > pk) pk = v; } });
+    return (levelCache[key] = 0.9 / (pk || 1));
   }
 
+  function toWavUrl(events, n, scale) {
+    const ab = new ArrayBuffer(44 + n * 2), dv = new DataView(ab);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) dv.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); w(8, 'WAVE');
+    w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, SR, true); dv.setUint32(28, SR * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+    w(36, 'data'); dv.setUint32(40, n * 2, true);
+    const out = new Int16Array(ab, 44, n);
+    mixBlocks(events, n, (b, s, len) => {
+      for (let i = 0; i < len; i++) {
+        let v = b[i] * scale;
+        out[s + i] = (v > 1 ? 1 : v < -1 ? -1 : v) * 32767;
+      }
+    });
+    return URL.createObjectURL(new Blob([ab], { type: 'audio/wav' }));
+  }
+
+  function sessionUrlFor() {
+    const evs = [];
+    for (let k = 0; k < cycles * 2; k++) evs.push({ start: Math.round((LEAD + eventTime(k)) * SR), buf: k % 2 ? R.out : R.in });
+    evs.push({ start: Math.round((LEAD + cycles * cycleLen()) * SR), buf: R.end });
+    const last = evs[evs.length - 1];
+    return toWavUrl(evs, last.start + last.buf.length, levelFor(pattern) * volume);
+  }
+
+  // ---- UI ----
   function render() {
-    const tag = `${pattern.in} in · ${pattern.out} ut`;
-    $('tag').textContent = tag;
+    $('tag').textContent = `${pattern.in} in · ${pattern.out} ut`;
     document.querySelectorAll('#patterns button').forEach(b =>
       b.setAttribute('aria-pressed', +b.dataset.in === pattern.in && +b.dataset.out === pattern.out));
     document.querySelectorAll('#times button').forEach(b =>
       b.setAttribute('aria-pressed', +b.dataset.min === minutes));
     const locked = state === 'running' || state === 'paused';
     document.querySelectorAll('#patterns button, #times button').forEach(b => b.disabled = locked);
-    $('start').textContent = state === 'running' ? 'Paus' : state === 'paused' ? 'Fortsätt' : state === 'done' ? 'Starta igen' : 'Starta';
+    $('vol').disabled = locked;
+    $('test').disabled = locked || !R;
+    $('start').disabled = !R;
+    $('start').textContent = !R ? 'Förbereder ljud…' : state === 'running' ? 'Paus' : state === 'paused' ? 'Fortsätt' : state === 'done' ? 'Starta igen' : 'Starta';
     $('stop').hidden = !locked;
     if (state === 'idle') {
       phaseEl.textContent = 'Redo';
@@ -330,35 +393,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     }
   }
 
-  // Timing runs on the wall clock (performance.now), not the audio clock.
-  // On iPhone the audio clock can run a few percent fast when the sample rate
-  // doesn't match the hardware, which made every breath slightly short.
-  // Bells are only scheduled 0.2 s ahead, so the audio clock can't drift.
-  let runStart = 0, elapsedBase = 0;
-  const now = () => performance.now() / 1000;
-  const elapsed = () => state === 'running' ? elapsedBase + (now() - runStart) : elapsedBase;
-  const eventTime = k => Math.floor(k / 2) * (pattern.in + pattern.out) + (k % 2 ? pattern.in : 0);
-
-  function scheduleAhead() {
-    if (state !== 'running') return;
-    const e = elapsed();
-    const lastEvent = cycles * 2;          // index of the closing chime
-    while (nextEvent <= lastEvent) {
-      const k = nextEvent;
-      const delay = eventTime(k) - e;
-      if (delay > 0.2) break;
-      const t = ctx.currentTime + Math.max(0.005, delay);
-      const snd = SOUNDS[voice];
-      if (k === lastEvent) { bell(t, snd.in, 0.8); bell(t + 1.2, snd.out, 0.8); bell(t + 2.4, snd.out, 0.6); }
-      else bell(t, k % 2 ? snd.out : snd.in);
-      nextEvent++;
-    }
+  // Smooth the player's clock between its updates so the circle moves evenly.
+  let ctSeen = -1, ctAt = 0;
+  function mediaTime() {
+    const ct = player.currentTime, t = performance.now() / 1000;
+    if (ct !== ctSeen) { ctSeen = ct; ctAt = t; return ct; }
+    return player.paused ? ct : ct + Math.min(0.3, t - ctAt);
   }
 
   function frame() {
-    const cyc = pattern.in + pattern.out;
-    const total = cycles * cyc;
-    const e = Math.max(0, elapsed());
+    if (state !== 'running') return;
+    const cyc = cycleLen(), total = cycles * cyc;
+    const e = Math.max(0, mediaTime() - LEAD);
     if (e >= total) { finish(); return; }
     const c = e % cyc;
     const inhale = c < pattern.in;
@@ -368,86 +414,88 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     disc.style.transform = reduced ? 'scale(0.8)' : `scale(${s.toFixed(4)})`;
     disc.style.setProperty('--c', inhale ? 'var(--in)' : 'var(--out)');
     phaseEl.textContent = inhale ? 'Andas in' : 'Andas ut';
-    const left = inhale ? pattern.in - c : cyc - c;
-    countEl.textContent = Math.ceil(left - 0.001);
+    countEl.textContent = Math.ceil((inhale ? pattern.in - c : cyc - c) - 0.001);
     $('elapsed').textContent = fmt(e);
     $('remaining').textContent = fmt(total - e) + ' kvar';
     $('bar').style.width = (100 * e / total).toFixed(2) + '%';
     raf = requestAnimationFrame(frame);
   }
 
-  async function lockScreen() {
-    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { wakeLock = null; }
+  function setMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'Klockandning',
+        artist: `${pattern.in} in · ${pattern.out} ut · ${minutes} min`
+      });
+    } catch {}
+    const on = (a, fn) => { try { navigator.mediaSession.setActionHandler(a, fn); } catch {} };
+    on('play', () => player.play());
+    on('pause', () => player.pause());
+    on('stop', stop);
   }
-  function releaseScreen() { try { wakeLock?.release(); } catch {} wakeLock = null; }
 
   function start() {
-    ensureAudio();
-    const cyc = pattern.in + pattern.out;
-    cycles = Math.ceil(minutes * 60 / cyc);
-    elapsedBase = -0.15;
-    runStart = now();
-    nextEvent = 0;
+    if (!R) return;
+    previewer.pause();
+    cycles = Math.ceil(minutes * 60 / cycleLen());
+    if (sessionUrl) URL.revokeObjectURL(sessionUrl);
+    sessionUrl = sessionUrlFor();
+    player.src = sessionUrl;
+    ctSeen = -1;
     state = 'running';
-    scheduleAhead();
-    clearInterval(timer);
-    timer = setInterval(scheduleAhead, 50);
+    setMediaSession();
+    const p = player.play();
+    if (p && p.catch) p.catch(() => { state = 'idle'; render(); phaseEl.textContent = 'Tryck på Starta'; });
     cancelAnimationFrame(raf);
     raf = requestAnimationFrame(frame);
-    lockScreen();
-    render();
-  }
-
-  function silenceScheduled() {
-    // Cut bells already scheduled by swapping the input bus; the reverb tail fades out naturally.
-    bus.disconnect();
-    connectBus();
-  }
-
-  function pause() {
-    elapsedBase = elapsed();
-    state = 'paused';
-    silenceScheduled();
-    nextEvent = 0;
-    while (nextEvent <= cycles * 2 && eventTime(nextEvent) < elapsedBase) nextEvent++;
-    cancelAnimationFrame(raf);
-    phaseEl.textContent = 'Paus';
-    releaseScreen();
-    render();
-  }
-
-  function resume() {
-    ensureAudio();
-    runStart = now();
-    state = 'running';
-    scheduleAhead();
-    raf = requestAnimationFrame(frame);
-    lockScreen();
     render();
   }
 
   function finish() {
-    scheduleAhead();                       // make sure the closing chime is queued
-    clearInterval(timer);
-    cancelAnimationFrame(raf);
     state = 'done';
+    cancelAnimationFrame(raf);
     phaseEl.textContent = 'Klart';
-    countEl.textContent = fmt(cycles * (pattern.in + pattern.out));
+    countEl.textContent = fmt(cycles * cycleLen());
+    $('elapsed').textContent = fmt(cycles * cycleLen());
     $('bar').style.width = '100%';
     $('remaining').textContent = '0:00 kvar';
     disc.style.transform = 'scale(0.5)';
-    releaseScreen();
     render();
   }
 
   function stop() {
-    clearInterval(timer);
-    cancelAnimationFrame(raf);
-    if (ctx) silenceScheduled();
-    releaseScreen();
     state = 'idle';
-    elapsedBase = 0;
+    cancelAnimationFrame(raf);
+    player.pause();
+    try { player.currentTime = 0; } catch {}
     render();
+  }
+
+  player.addEventListener('pause', () => {
+    if (state !== 'running') return;
+    if (player.ended || player.currentTime - LEAD >= cycles * cycleLen()) { finish(); return; }
+    state = 'paused';
+    cancelAnimationFrame(raf);
+    render();
+    phaseEl.textContent = 'Paus';
+  });
+  player.addEventListener('play', () => {
+    if (state !== 'paused') return;
+    state = 'running';
+    raf = requestAnimationFrame(frame);
+    render();
+  });
+  player.addEventListener('ended', () => { if (state === 'running' || state === 'paused') finish(); });
+
+  function preview() {
+    if (!R) return;
+    const evs = [{ start: Math.round(0.05 * SR), buf: R.in }, { start: Math.round(2.45 * SR), buf: R.out }];
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = toWavUrl(evs, evs[1].start + R.out.length, levelFor(pattern) * volume);
+    previewer.src = previewUrl;
+    const p = previewer.play();
+    if (p && p.catch) p.catch(() => {});
   }
 
   $('patterns').addEventListener('click', e => {
@@ -467,22 +515,19 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   $('vol').addEventListener('input', e => {
     volume = +e.target.value;
     store.set('volume', volume);
-    if (master) master.gain.value = volume;
   });
   $('test').addEventListener('click', preview);
   $('start').addEventListener('click', () => {
-    if (state === 'running') pause();
-    else if (state === 'paused') resume();
+    if (state === 'running') player.pause();
+    else if (state === 'paused') player.play();
     else start();
   });
   $('stop').addEventListener('click', stop);
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && state === 'running') lockScreen();
-  });
-
   render();
+  renderBells().then(render, () => { phaseEl.textContent = 'Ljudet kunde inte laddas'; });
 })();
 </script>
 
-</body></html>
+</body>
+</html>
