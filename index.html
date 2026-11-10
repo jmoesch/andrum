@@ -189,9 +189,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
       </div>
     </div>
     <div class="group" id="mixGroup" hidden>
-      <label><input type="checkbox" id="mix" aria-describedby="mixHint"> Spela tillsammans med annan musik</label>
-      <p class="hint" id="mixHint">Starta musiken före passet. När det här läget är på kan klockorna tystna om du låser skärmen.</p>
+      <label><input type="checkbox" id="mix" aria-describedby="mixHint"> Spotify eller annan app · skärmen på</label>
+      <p class="hint" id="mixHint">Starta musiken före passet. På iPhone behöver skärmen vara på för att klockorna ska höras i det här läget.</p>
     </div>
+    <details id="musicOptions">
+      <summary>Musik med låst skärm</summary>
+      <div class="group">
+        <label for="musicFile">Välj en egen ljudfil. Musiken upprepas under passet.</label>
+        <input id="musicFile" type="file" accept="audio/*,.mp3,.m4a,.wav">
+        <span id="musicStatus" class="hint" role="status"></span>
+        <button id="clearMusic" type="button" hidden>Ta bort musik</button>
+      </div>
+    </details>
     <div class="actions">
       <button type="button" class="primary" id="start">Starta</button>
       <button type="button" class="secondary" id="stop" hidden>Avsluta</button>
@@ -249,6 +258,47 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     player.pause();
     navigator.audioSession.type = $('mix').checked ? 'ambient' : 'playback';
     store.set('mixMusic', $('mix').checked);
+  });
+
+  let track = null;
+  let loadingTrack = false;
+  function clearTrack() {
+    track = null;
+    $('musicFile').value = '';
+    $('musicStatus').textContent = '';
+    render();
+  }
+  $('clearMusic').addEventListener('click', clearTrack);
+  $('musicFile').addEventListener('change', async () => {
+    const file = $('musicFile').files[0];
+    if (!file) return;
+    loadingTrack = true;
+    track = null;
+    $('musicStatus').textContent = 'Läser ljudfilen…';
+    render();
+    try {
+      const Context = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      const decoded = await new Context(1, 1, SR).decodeAudioData(await file.arrayBuffer());
+      if (!decoded.length) throw new Error();
+      // Downmix at the session sample rate.
+      const mono = new Float32Array(decoded.length);
+      for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
+        const data = decoded.getChannelData(channel);
+        for (let i = 0; i < mono.length; i++) mono[i] += data[i] / decoded.numberOfChannels;
+      }
+      if ($('mix').checked) {
+        $('mix').checked = false;
+        $('mix').dispatchEvent(new Event('change'));
+      }
+      track = mono;
+      $('musicStatus').textContent = 'Musiken och klockorna spelas i samma ljudspår.';
+    } catch {
+      $('musicFile').value = '';
+      $('musicStatus').textContent = 'Filen kunde inte läsas. Prova en MP3- eller WAV-fil.';
+    } finally {
+      loadingTrack = false;
+      render();
+    }
   });
 
   // Some mobile browsers keep element volume fixed at 1.
@@ -365,7 +415,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     return (levelCache[key] = 0.9 / (pk || 1));
   }
 
-  function toWavUrl(events, n, scale) {
+  function toWavUrl(events, n, scale, music = null) {
     const ab = new ArrayBuffer(44 + n * 2), dv = new DataView(ab);
     const w = (o, str) => { for (let i = 0; i < str.length; i++) dv.setUint8(o + i, str.charCodeAt(i)); };
     w(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); w(8, 'WAVE');
@@ -376,6 +426,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     mixBlocks(events, n, (b, s, len) => {
       for (let i = 0; i < len; i++) {
         let v = b[i] * scale;
+        if (music) {
+          const at = s + i;
+          const fade = Math.min(1, at / SR, (n - 1 - at) / SR);
+          v += 0.22 * fade * music[at % music.length];
+        }
         out[s + i] = (v > 1 ? 1 : v < -1 ? -1 : v) * 32767;
       }
     });
@@ -387,7 +442,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     for (let k = 0; k < cycles * 2; k++) evs.push({ start: Math.round((LEAD + eventTime(k)) * SR), buf: k % 2 ? R.out : R.in });
     evs.push({ start: Math.round((LEAD + cycles * cycleLen()) * SR), buf: R.end });
     const last = evs[evs.length - 1];
-    return toWavUrl(evs, last.start + last.buf.length, audioScale());
+    return toWavUrl(evs, last.start + last.buf.length, track ? levelFor(pattern) * volume * 0.8 : audioScale(), track);
   }
 
   // ---- UI ----
@@ -396,9 +451,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
       b.setAttribute('aria-pressed', +b.dataset.min === minutes));
     const locked = state === 'running' || state === 'paused';
     document.querySelectorAll('#times button').forEach(b => b.disabled = locked);
-    $('mix').disabled = locked;
+    $('mix').disabled = locked || loadingTrack || !!track;
+    $('musicFile').disabled = locked || loadingTrack;
+    $('clearMusic').hidden = !track;
+    $('clearMusic').disabled = locked;
     $('test').disabled = locked || !R;
-    $('start').disabled = !R;
+    $('start').disabled = !R || loadingTrack;
     $('start').textContent = !R ? 'Förbereder ljud…' : state === 'running' ? 'Paus' : state === 'paused' ? 'Fortsätt' : state === 'done' ? 'Starta igen' : 'Starta';
     $('stop').hidden = !locked;
     if (state === 'idle') {
@@ -467,6 +525,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     cycles = Math.ceil(minutes * 60 / cycleLen());
     if (sessionUrl) URL.revokeObjectURL(sessionUrl);
     sessionUrl = sessionUrlFor();
+    if (liveVolume) player.volume = track ? 1 : volume;
     player.src = sessionUrl;
     ctSeen = -1;
     state = 'running';
@@ -534,10 +593,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   $('vol').addEventListener('input', e => {
     volume = +e.target.value;
     store.set('volume', volume);
-    if (liveVolume) player.volume = previewer.volume = volume;
+    if (liveVolume) {
+      previewer.volume = volume;
+      if (!track) player.volume = volume;
+    }
   });
   $('vol').addEventListener('change', () => {
-    if (liveVolume || (state !== 'running' && state !== 'paused')) return;
+    if ((liveVolume && !track) || (state !== 'running' && state !== 'paused')) return;
     // Apply a new baked-in level on release and continue at the same position.
     const nextUrl = sessionUrlFor();
     const position = player.currentTime;
