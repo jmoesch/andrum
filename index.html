@@ -152,7 +152,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
 <div class="app">
   <header>
     <h1>Klockandning</h1>
-    <span class="pattern-tag" id="tag">4 in · 6 ut</span>
+    <span class="pattern-tag">4 s in · 6 s ut</span>
   </header>
 
   <div class="stage" aria-live="polite">
@@ -171,15 +171,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
 
   <div class="controls">
     <div class="group">
-      <span class="label">Rytm</span>
-      <div class="seg" id="patterns">
-        <button type="button" id="p44" data-in="4" data-out="4">4 – 4<small>balanserande</small></button>
-        <button type="button" id="p46" data-in="4" data-out="6">4 – 6<small>lugnande</small></button>
-      </div>
-    </div>
-    <div class="group">
       <span class="label">Tid</span>
       <div class="seg" id="times">
+        <button type="button" id="t1" data-min="1">1 min</button>
         <button type="button" id="t3" data-min="3">3 min</button>
         <button type="button" id="t5" data-min="5">5 min</button>
         <button type="button" id="t10" data-min="10">10 min</button>
@@ -193,6 +187,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
         <input type="range" id="vol" min="0" max="1" step="0.05" value="0.7">
         <button type="button" id="test">Provlyssna</button>
       </div>
+    </div>
+    <div class="group" id="mixGroup" hidden>
+      <label><input type="checkbox" id="mix" aria-describedby="mixHint"> Spela tillsammans med annan musik</label>
+      <p class="hint" id="mixHint">Starta musiken före passet. När det här läget är på kan klockorna tystna om du låser skärmen.</p>
     </div>
     <div class="actions">
       <button type="button" class="primary" id="start">Starta</button>
@@ -212,7 +210,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
   };
 
-  let pattern = store.get('pattern', { in: 4, out: 6 });
+  const pattern = Object.freeze({ in: 4, out: 6 });
   let minutes = store.get('minutes', 10);
   let volume = store.get('volume', 0.7);
   $('vol').value = volume;
@@ -220,7 +218,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   // The whole session is rendered to one audio file and played through an
   // ordinary <audio> element. iPhone keeps that playing with the screen locked
   // (Web Audio and timers stop there), and the file's own clock keeps the
-  // 4–4 / 4–6 rhythm exact.
+  // 4–6 rhythm exact.
   const SR = 22050;
   const LEAD = 0.3;                // seconds of silence before the first bell
   const BOWL = {
@@ -236,7 +234,31 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   const player = new Audio();
   const previewer = new Audio();
   player.preload = previewer.preload = 'auto';
-  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+  let mixAvailable = false;
+  try {
+    if (navigator.audioSession) {
+      navigator.audioSession.type = 'ambient';
+      mixAvailable = navigator.audioSession.type === 'ambient';
+      $('mix').checked = mixAvailable && store.get('mixMusic', false) === true;
+      navigator.audioSession.type = $('mix').checked ? 'ambient' : 'playback';
+    }
+  } catch {}
+  $('mixGroup').hidden = !mixAvailable;
+  $('mix').addEventListener('change', () => {
+    previewer.pause();
+    player.pause();
+    navigator.audioSession.type = $('mix').checked ? 'ambient' : 'playback';
+    store.set('mixMusic', $('mix').checked);
+  });
+
+  // Some mobile browsers keep element volume fixed at 1.
+  let liveVolume = false;
+  try {
+    player.volume = 0.5;
+    liveVolume = player.volume === 0.5;
+    player.volume = previewer.volume = liveVolume ? volume : 1;
+  } catch {}
+  const audioScale = () => levelFor(pattern) * (liveVolume ? 1 : volume);
 
   const fmt = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
   const cycleLen = () => pattern.in + pattern.out;
@@ -365,19 +387,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     for (let k = 0; k < cycles * 2; k++) evs.push({ start: Math.round((LEAD + eventTime(k)) * SR), buf: k % 2 ? R.out : R.in });
     evs.push({ start: Math.round((LEAD + cycles * cycleLen()) * SR), buf: R.end });
     const last = evs[evs.length - 1];
-    return toWavUrl(evs, last.start + last.buf.length, levelFor(pattern) * volume);
+    return toWavUrl(evs, last.start + last.buf.length, audioScale());
   }
 
   // ---- UI ----
   function render() {
-    $('tag').textContent = `${pattern.in} in · ${pattern.out} ut`;
-    document.querySelectorAll('#patterns button').forEach(b =>
-      b.setAttribute('aria-pressed', +b.dataset.in === pattern.in && +b.dataset.out === pattern.out));
     document.querySelectorAll('#times button').forEach(b =>
       b.setAttribute('aria-pressed', +b.dataset.min === minutes));
     const locked = state === 'running' || state === 'paused';
-    document.querySelectorAll('#patterns button, #times button').forEach(b => b.disabled = locked);
-    $('vol').disabled = locked;
+    document.querySelectorAll('#times button').forEach(b => b.disabled = locked);
+    $('mix').disabled = locked;
     $('test').disabled = locked || !R;
     $('start').disabled = !R;
     $('start').textContent = !R ? 'Förbereder ljud…' : state === 'running' ? 'Paus' : state === 'paused' ? 'Fortsätt' : state === 'done' ? 'Starta igen' : 'Starta';
@@ -423,6 +442,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
 
   function setMediaSession() {
     if (!('mediaSession' in navigator)) return;
+    if ($('mix').checked) {
+      try {
+        navigator.mediaSession.metadata = null;
+        for (const action of ['play', 'pause', 'stop']) navigator.mediaSession.setActionHandler(action, null);
+      } catch {}
+      return;
+    }
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: 'Klockandning',
@@ -473,7 +499,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   }
 
   player.addEventListener('pause', () => {
-    if (state !== 'running') return;
+    if (state !== 'running' || !player.paused) return;
     if (player.ended || player.currentTime - LEAD >= cycles * cycleLen()) { finish(); return; }
     state = 'paused';
     cancelAnimationFrame(raf);
@@ -490,21 +516,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
 
   function preview() {
     if (!R) return;
-    const evs = [{ start: Math.round(0.05 * SR), buf: R.in }, { start: Math.round(2.45 * SR), buf: R.out }];
+    const evs = [{ start: Math.round(0.05 * SR), buf: R.in }, { start: Math.round((0.05 + pattern.in) * SR), buf: R.out }];
     if (previewUrl) URL.revokeObjectURL(previewUrl);
-    previewUrl = toWavUrl(evs, evs[1].start + R.out.length, levelFor(pattern) * volume);
+    previewUrl = toWavUrl(evs, evs[1].start + R.out.length, audioScale());
     previewer.src = previewUrl;
     const p = previewer.play();
     if (p && p.catch) p.catch(() => {});
   }
 
-  $('patterns').addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b || b.disabled) return;
-    pattern = { in: +b.dataset.in, out: +b.dataset.out };
-    store.set('pattern', pattern);
-    if (state === 'done') state = 'idle';
-    render();
-  });
   $('times').addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b || b.disabled) return;
     minutes = +b.dataset.min;
@@ -515,6 +534,27 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   $('vol').addEventListener('input', e => {
     volume = +e.target.value;
     store.set('volume', volume);
+    if (liveVolume) player.volume = previewer.volume = volume;
+  });
+  $('vol').addEventListener('change', () => {
+    if (liveVolume || (state !== 'running' && state !== 'paused')) return;
+    // Apply a new baked-in level on release and continue at the same position.
+    const nextUrl = sessionUrlFor();
+    const position = player.currentTime;
+    const running = state === 'running';
+    const oldUrl = sessionUrl;
+    sessionUrl = nextUrl;
+    player.src = nextUrl;
+    player.currentTime = position;
+    ctSeen = -1;
+    if (running) player.play().catch(() => {
+      if (sessionUrl === nextUrl && state === 'running') {
+        state = 'paused';
+        phaseEl.textContent = 'Paus';
+        render();
+      }
+    });
+    URL.revokeObjectURL(oldUrl);
   });
   $('test').addEventListener('click', preview);
   $('start').addEventListener('click', () => {
