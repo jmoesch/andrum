@@ -9,7 +9,7 @@
 body { margin: 0; font: 14px/1.4 system-ui, -apple-system, sans-serif; }
 [hidden] { display: none !important; }
 </style>
-<title>Klockandning v1.3.2</title>
+<title>Klockandning v1.3.3</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Andning">
@@ -144,6 +144,7 @@ h1 {
 .secondary { background: var(--bg-2); color: var(--fg); border: 1px solid var(--line); padding-inline: 22px; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outline-offset: 2px; }
 
+.hint:empty { display: none; }
 .hint { color: var(--muted); font-size: 0.8rem; line-height: 1.5; margin: 0; }
 </style>
 
@@ -154,7 +155,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     <h1>Klockandning</h1>
     <span class="pattern-tag">4 s in · 6 s ut</span>
   </header>
-  <span class="hint">v1.3.2</span>
 
   <div class="stage" aria-live="polite">
     <div class="guide"></div>
@@ -190,12 +190,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
       </div>
     </div>
     <div class="group" id="mixGroup" hidden>
-      <label><input type="checkbox" id="mix" aria-describedby="mixHint"> Spela tillsammans med annan musik</label>
-      <p class="hint" id="mixHint">Starta musiken före passet och låt appen vara öppen. Skärmen hålls vaken i det här läget.</p>
+      <label><input type="checkbox" id="mix"> Bakgrundsmusik</label>
       <p class="hint" id="wakeStatus" role="status"></p>
-      <button type="button" id="retryWake" hidden>Håll skärmen vaken</button>
+      <button type="button" id="retryWake" hidden>Försök igen</button>
     </div>
-    <p class="hint">Volymen ändras när du släpper reglaget.</p>
     <div class="actions">
       <button type="button" class="primary" id="start">Starta</button>
       <button type="button" class="secondary" id="stop" hidden>Avsluta</button>
@@ -278,11 +276,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     if (wakeLock && !wakeLock.released) return;
     if (wakePending) return;
     if (!navigator.wakeLock) {
-      status.textContent = 'Skärmen kan inte hållas vaken här. Öppna appen i uppdaterad Safari via HTTPS.';
+      status.textContent = 'Skärmlås stöds inte här.';
       return;
     }
     wakePending = true;
-    status.textContent = 'Aktiverar skärm på…';
+    status.textContent = '';
     try {
       const lock = await navigator.wakeLock.request('screen');
       if (!needsWakeLock()) {
@@ -290,18 +288,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
         return;
       }
       wakeLock = lock;
-      status.textContent = 'Skärmen hålls vaken';
+      status.textContent = '';
       lock.addEventListener('release', () => {
         if (wakeLock !== lock) return;
         wakeLock = null;
         status.textContent = needsWakeLock()
-          ? 'Skärmlåset släpptes av telefonen. Tryck på Håll skärmen vaken.'
+          ? 'Skärmen kan släckas.'
           : '';
         $('retryWake').hidden = !needsWakeLock();
       });
       $('retryWake').hidden = true;
     } catch {
-      status.textContent = 'Skärmen kunde inte hållas vaken. Öppna via HTTPS i Safari och kontrollera strömsparläget.';
+      status.textContent = 'Kunde inte hålla skärmen vaken.';
       $('retryWake').hidden = false;
     } finally {
       wakePending = false;
