@@ -1,0 +1,23 @@
+{
+  "id": "./",
+  "name": "Andrum",
+  "short_name": "Andrum",
+  "lang": "sv",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0e1820",
+  "theme_color": "#0e1820",
+  "icons": [
+    {
+      "src": "./icons/andrum-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./icons/andrum-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

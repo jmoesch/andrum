@@ -9,13 +9,50 @@
 body { margin: 0; font: 14px/1.4 system-ui, -apple-system, sans-serif; }
 [hidden] { display: none !important; }
 </style>
-<title>Klockandning v1.3.3</title>
-<meta name="claude:viewport-fit-sides" content="cover">
+<title>Andrum</title>
+<meta name="theme-color" content="#0e1820">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Andning">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@1,7..72,300;1,7..72,400&family=Figtree:wght@400;500;600&display=swap">
+<meta name="apple-mobile-web-app-title" content="Andrum">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/andrum-180.png">
+<link rel="icon" href="./icons/andrum-192.png">
 <style>
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./fonts/figtree-0.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(./fonts/figtree-1.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(./fonts/figtree-2.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Literata';
+  font-style: italic;
+  font-weight: 300;
+  font-display: swap;
+  src: url(./fonts/literata-3.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Literata';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./fonts/literata-4.ttf) format('truetype');
+}
+
 /* Layout: one calm night-sea screen; breathing disc in the middle, settings below. Deliberately dark-only. */
 :root {
   --bg: #0e1820;
@@ -57,13 +94,7 @@ h1 {
   font-size: 1.5rem;
   margin: 0;
 }
-.pattern-tag {
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
+
 
 /* Breathing disc */
 .stage {
@@ -146,14 +177,21 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
 
 .hint:empty { display: none; }
 .hint { color: var(--muted); font-size: 0.8rem; line-height: 1.5; margin: 0; }
+
+.app.in-session { min-height: calc(100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+.in-session .stage { max-width: min(100%, 54svh); margin-block: auto; }
+.in-session.details-open .stage { max-width: min(100%, 42svh); }
+.stage-toggle { position: absolute; inset: 0; border: 0; background: transparent; border-radius: 50%; cursor: pointer; }
+.in-session #timeGroup, .in-session #test, .in-session #mixGroup > label { display: none; }
+.in-session #mixGroup:has(.hint:empty):has(#retryWake[hidden]) { display: none; }
+.in-session:not(.details-open) :is(#sessionProgress, #volumeGroup) { display: none; }
 </style>
 
 </head>
 <body>
 <div class="app">
   <header>
-    <h1>Klockandning</h1>
-    <span class="pattern-tag">4 s in · 6 s ut</span>
+    <h1>Andrum</h1>
   </header>
 
   <div class="stage" aria-live="polite">
@@ -163,15 +201,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
       <div class="phase" id="phase">Redo</div>
       <div class="count" id="count">10:00</div>
     </div>
+    <button type="button" class="stage-toggle" id="detailsToggle" aria-label="Volym och återstående tid" aria-controls="volumeGroup sessionProgress" aria-expanded="false" hidden></button>
   </div>
 
-  <div class="session">
+  <div class="session" id="sessionProgress">
     <div class="session-row"><span id="elapsed">0:00</span><span id="remaining">10:00 kvar</span></div>
     <div class="bar"><i id="bar"></i></div>
   </div>
 
   <div class="controls">
-    <div class="group">
+    <div class="group" id="timeGroup">
       <span class="label">Tid</span>
       <div class="seg" id="times">
         <button type="button" id="t1" data-min="1">1 min</button>
@@ -182,7 +221,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
         <button type="button" id="t20" data-min="20">20 min</button>
       </div>
     </div>
-    <div class="group">
+    <div class="group" id="volumeGroup">
       <label class="label" for="vol">Klockvolym · <output id="volumeValue" for="vol">70 %</output></label>
       <div class="vol">
         <input type="range" id="vol" min="0" max="1" step="0.05" value="0.7">
@@ -225,12 +264,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   // 4–6 rhythm exact.
   const SR = 22050;
   const LEAD = 0.3;                // seconds of silence before the first bell
-  const BOWL = {
-    in:  { f: 528, decay: 7,  attack: 0.012, beat: 1.6, strike: 0.25, strikeTone: 4, gain: 1,
-           partials: [[1, 1, 1], [2.71, 0.55, 0.65], [5.15, 0.28, 0.4], [8.17, 0.12, 0.25]] },
-    out: { f: 220, decay: 10, attack: 0.02,  beat: 0.9, strike: 0.18, strikeTone: 3, gain: 1.5,
-           partials: [[1, 1, 1], [2.71, 0.7, 0.75], [5.15, 0.3, 0.45], [8.17, 0.08, 0.25]] }
-  };
 
   let R = null;                    // rendered bell sounds: { in, out, end }
   let state = 'idle';              // idle | running | paused | done
@@ -339,75 +372,22 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   const cycleLen = () => pattern.in + pattern.out;
   const eventTime = k => Math.floor(k / 2) * cycleLen() + (k % 2 ? pattern.in : 0);
 
-  // ---- Bell synthesis (offline) ----
-  function bell(c, dest, noise, time, s, level) {
-    const out = c.createGain();
-    out.gain.value = 0.16 * level * s.gain;
-    out.connect(dest);
-    s.partials.forEach(([ratio, amp, rel], i) => {
-      const f = s.f * ratio, d = s.decay * rel;
-      const env = c.createGain();
-      env.gain.setValueAtTime(0.0001, time);
-      env.gain.linearRampToValueAtTime(amp, time + s.attack);
-      env.gain.exponentialRampToValueAtTime(0.0001, time + s.attack + d);
-      env.connect(out);
-      const spread = s.beat * (0.5 + i * 0.3) / 2;   // detuned pair = slow shimmer
-      [-1, 1].forEach(sign => {
-        const o = c.createOscillator();
-        o.frequency.value = f + sign * spread;
-        const g = c.createGain(); g.gain.value = 0.5;
-        o.connect(g); g.connect(env);
-        o.start(time); o.stop(time + s.attack + d + 0.1);
-      });
-    });
-    const n = c.createBufferSource(); n.buffer = noise;
-    const bp = c.createBiquadFilter(); bp.type = 'bandpass';
-    bp.frequency.value = Math.min(SR / 2.5, s.f * s.strikeTone); bp.Q.value = 1.2;
-    const ng = c.createGain();
-    ng.gain.setValueAtTime(0.0001, time);
-    ng.gain.linearRampToValueAtTime(s.strike, time + 0.002);
-    ng.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
-    n.connect(bp); bp.connect(ng); ng.connect(out);
-    n.start(time); n.stop(time + 0.15);
-  }
-
-  async function renderBells() {
-    const SLOT = 16, END = 20;
-    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    const c = new OAC(1, Math.ceil((SLOT * 2 + END) * SR), SR);
-    const ir = c.createBuffer(1, Math.floor(SR * 4.5), SR);
-    const d = ir.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
-    const noise = c.createBuffer(1, Math.floor(SR * 0.2), SR);
-    const nd = noise.getChannelData(0);
-    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
-    const bus = c.createGain();
-    const dry = c.createGain(); dry.gain.value = 0.75;
-    const conv = c.createConvolver(); conv.normalize = true; conv.buffer = ir;
-    const wet = c.createGain(); wet.gain.value = 0.6;
-    bus.connect(dry); dry.connect(c.destination);
-    bus.connect(conv); conv.connect(wet); wet.connect(c.destination);
-
-    const t1 = 0.01, t2 = SLOT + 0.01, t3 = SLOT * 2 + 0.01;
-    bell(c, bus, noise, t1, BOWL.in, 1);
-    bell(c, bus, noise, t2, BOWL.out, 1);
-    bell(c, bus, noise, t3, BOWL.in, 0.8);
-    bell(c, bus, noise, t3 + 1.2, BOWL.out, 0.8);
-    bell(c, bus, noise, t3 + 2.4, BOWL.out, 0.6);
-
-    const buf = await new Promise((res, rej) => {
-      c.oncomplete = e => res(e.renderedBuffer);
-      const p = c.startRendering();
-      if (p && p.then) p.then(res, rej);
-    });
-    const all = buf.getChannelData(0);
-    const cut = (a, b) => {
-      const s = all.slice(Math.floor(a * SR), Math.floor(b * SR));
-      let last = s.length - 1;
-      while (last > 0 && Math.abs(s[last]) < 1e-5) last--;
-      return s.slice(0, last + 1);
-    };
-    R = { in: cut(t1, SLOT), out: cut(t2, SLOT * 2), end: cut(t3, SLOT * 2 + END) };
+  async function loadBells() {
+    const Decoder = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const decoder = new Decoder(1, 1, SR);
+    async function loadStrike(name) {
+      const response = await fetch('./sounds/' + name + '.wav');
+      if (!response.ok) throw new Error('Missing recording: ' + name);
+      const audio = await decoder.decodeAudioData(await response.arrayBuffer());
+      return audio.getChannelData(0);
+    }
+    const [inhale, exhale] = await Promise.all([loadStrike('in'), loadStrike('out')]);
+    const ending = new Float32Array(Math.max(inhale.length, Math.round(2.4 * SR) + exhale.length));
+    for (const [clip, seconds, gain] of [[inhale, 0, 0.8], [exhale, 1.2, 0.8], [exhale, 2.4, 0.6]]) {
+      const offset = Math.round(seconds * SR);
+      for (let i = 0; i < clip.length; i++) ending[offset + i] += clip[i] * gain;
+    }
+    R = { in: inhale, out: exhale, end: ending };
   }
 
   // ---- Mixing to a WAV file ----
@@ -466,11 +446,24 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   }
 
   // ---- UI ----
+  const app = document.querySelector('.app');
+  const detailsToggle = $('detailsToggle');
+  detailsToggle.addEventListener('click', () => {
+    const expanded = app.classList.toggle('details-open');
+    detailsToggle.setAttribute('aria-expanded', String(expanded));
+  });
+
   function render() {
     document.querySelectorAll('#times button').forEach(b =>
       b.setAttribute('aria-pressed', +b.dataset.min === minutes));
     const locked = state === 'running' || state === 'paused';
     document.querySelectorAll('#times button').forEach(b => b.disabled = locked);
+    app.classList.toggle('in-session', locked);
+    detailsToggle.hidden = !locked;
+    if (!locked) {
+      app.classList.remove('details-open');
+      detailsToggle.setAttribute('aria-expanded', 'false');
+    }
     $('mix').disabled = locked;
     $('test').disabled = locked || !R;
     $('start').disabled = !R;
@@ -526,8 +519,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
     }
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
-        title: 'Klockandning',
-        artist: `${pattern.in} in · ${pattern.out} ut · ${minutes} min`
+        title: 'Andrum',
+        artist: `${minutes} min`,
+        artwork: [{ src: "./icons/andrum-512.png", sizes: "512x512", type: "image/png" }]
       });
     } catch {}
     const on = (a, fn) => { try { navigator.mediaSession.setActionHandler(a, fn); } catch {} };
@@ -646,9 +640,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
   $('stop').addEventListener('click', stop);
 
   render();
-  renderBells().then(render, () => { phaseEl.textContent = 'Ljudet kunde inte laddas'; });
+  loadBells().then(render, () => { phaseEl.textContent = 'Ljudet kunde inte laddas'; });
 })();
 </script>
 
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(console.error);
+}
+</script>
 </body>
 </html>
