@@ -1,3 +1,3 @@
-In: Bell-A.mp3 — edgepixel, CC0. https://freesound.org/people/edgepixel/sounds/451229/
-Out: Singing bowl, high and loud — eliasheuninck, CC0. https://freesound.org/people/eliasheuninck/sounds/170671/
-Adapted from Freesound HQ MP3 previews. Mono, level adjusted and faded.
+Inhale: user-supplied Dengze .m4a
+Exhale: user-supplied Kangse .m4a
+Leading and trailing silence trimmed. Final 80 ms faded to avoid a discontinuity. Converted to mono PCM for the existing playback engine.
