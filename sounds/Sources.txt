@@ -1,4 +1,3 @@
-In: Singing bowl, high and loud — eliasheuninck, CC0. https://freesound.org/people/eliasheuninck/sounds/170671/
-Out: Singing bowl, low and loud — eliasheuninck, CC0. https://freesound.org/people/eliasheuninck/sounds/170668/
+In: Bell-A.mp3 — edgepixel, CC0. https://freesound.org/people/edgepixel/sounds/451229/
+Out: Singing bowl, high and loud — eliasheuninck, CC0. https://freesound.org/people/eliasheuninck/sounds/170671/
 Adapted from Freesound HQ MP3 previews. Mono, level adjusted and faded.
-v1.4.3: exhale decay accelerated after 0.25 s, smooth fade to silence at 4 s.
