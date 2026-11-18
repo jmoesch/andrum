@@ -184,7 +184,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
 .stage-toggle { position: absolute; inset: 0; border: 0; background: transparent; border-radius: 50%; cursor: pointer; }
 .in-session #timeGroup, .in-session #test, .in-session #mixGroup > label { display: none; }
 .in-session #mixGroup:has(.hint:empty):has(#retryWake[hidden]) { display: none; }
-.in-session:not(.details-open) :is(#sessionProgress, #volumeGroup) { display: none; }
+.in-session:not(.details-open) #volumeGroup { display: none; }
 </style>
 
 </head>
@@ -201,11 +201,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--in); outlin
       <div class="phase" id="phase">Redo</div>
       <div class="count" id="count">10:00</div>
     </div>
-    <button type="button" class="stage-toggle" id="detailsToggle" aria-label="Volym och återstående tid" aria-controls="volumeGroup sessionProgress" aria-expanded="false" hidden></button>
+    <button type="button" class="stage-toggle" id="detailsToggle" aria-label="Visa eller dölj volym" aria-controls="volumeGroup" aria-expanded="false" hidden></button>
   </div>
 
   <div class="session" id="sessionProgress">
-    <div class="session-row"><span id="elapsed">0:00</span><span id="remaining">10:00 kvar</span></div>
+    <div class="session-row"><span><span id="elapsed">0:00</span> gått</span><span id="remaining">10:00 kvar</span></div>
     <div class="bar"><i id="bar"></i></div>
   </div>
 
