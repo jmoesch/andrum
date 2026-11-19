@@ -1,3 +1,5 @@
 Inhale: user-supplied Dengze .m4a
 Exhale: user-supplied Kangse .m4a
 Leading and trailing silence trimmed. Final 80 ms faded to avoid a discontinuity. Converted to mono PCM for the existing playback engine.
+
+v1.4.7: Kangse uses the original recording from 1.32 to 7.32 seconds. Natural decay extends through the six-second exhale, with a final 250 ms fade.

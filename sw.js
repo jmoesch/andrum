@@ -1,5 +1,5 @@
 const prefix = 'andrum-' + self.registration.scope + '-';
-const cacheName = prefix + '1.4.6';
+const cacheName = prefix + '1.4.7';
 const assets = [
   "./index.html",
   "./sounds/in.wav",
